@@ -1,0 +1,304 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>GREEK TO GO - KITCHEN DISPLAY</title>
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel:wght@700&family=Nunito:wght@400;700;900&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --blue-deep: #0B2545;
+            --blue-accent: #2E7DD1;
+            --blue-ghost: #EEF5FD;
+            --gold: #C9A84C;
+            --white: #FFFFFF;
+            --danger: #E05050;
+            --success: #27AE60;
+            --warning: #f39c12;
+            --gray: #8DA4BF;
+        }
+
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Nunito', sans-serif;
+            background: var(--blue-ghost);
+            color: var(--blue-deep);
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        header {
+            background: var(--blue-deep);
+            color: white;
+            padding: 15px 25px;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.1);
+        }
+
+        .logo {
+            font-family: 'Cinzel', serif;
+            font-size: 24px;
+            font-weight: 700;
+        }
+        .logo span { color: var(--gold); }
+
+        .stats {
+            display: flex;
+            gap: 20px;
+        }
+        .stat-item {
+            text-align: center;
+        }
+        .stat-val { font-weight: 900; font-size: 20px; }
+        .stat-lbl { font-size: 10px; text-transform: uppercase; opacity: 0.8; }
+
+        main {
+            flex: 1;
+            padding: 20px;
+            overflow-y: auto;
+        }
+
+        .orders-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+            gap: 20px;
+        }
+
+        .order-card {
+            background: white;
+            border-radius: 12px;
+            box-shadow: 0 6px 18px rgba(11,37,69,0.08);
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            border-top: 5px solid var(--blue-accent);
+            transition: transform 0.2s;
+        }
+        .order-card.priority { border-top-color: var(--danger); }
+        .order-card.ready { opacity: 0.7; }
+
+        .card-header {
+            padding: 15px;
+            background: #f8faff;
+            border-bottom: 1px solid #eee;
+            display: flex;
+            justify-content: space-between;
+            align-items: flex-start;
+        }
+        .order-meta h3 { font-size: 18px; margin-bottom: 2px; }
+        .order-meta p { font-size: 12px; color: var(--gray); font-weight: 700; }
+        .order-time { font-size: 12px; font-weight: 900; color: var(--blue-accent); }
+
+        .card-body {
+            padding: 15px;
+            flex: 1;
+        }
+        .item-row {
+            display: flex;
+            justify-content: space-between;
+            padding: 8px 0;
+            border-bottom: 1px dashed #eee;
+        }
+        .item-row:last-child { border-bottom: none; }
+        .item-qty { font-weight: 900; color: var(--blue-accent); margin-right: 10px; }
+        .item-name { font-weight: 700; flex: 1; }
+
+        .order-notes {
+            margin-top: 10px;
+            padding: 8px;
+            background: #fff9e6;
+            border-radius: 6px;
+            font-size: 12px;
+            color: #856404;
+            border-left: 3px solid var(--gold);
+        }
+
+        .card-footer {
+            padding: 12px;
+            background: #f8faff;
+            display: flex;
+            gap: 10px;
+        }
+        .btn {
+            flex: 1;
+            padding: 10px;
+            border: none;
+            border-radius: 8px;
+            font-weight: 800;
+            cursor: pointer;
+            font-family: inherit;
+            transition: all 0.2s;
+        }
+        .btn-ready { background: var(--success); color: white; }
+        .btn-ready:hover { background: #219150; }
+        .btn-clear { background: var(--gray); color: white; }
+        
+        .empty-state {
+            text-align: center;
+            padding: 100px 20px;
+            color: var(--gray);
+        }
+        .empty-state h2 { font-family: 'Cinzel', serif; margin-bottom: 10px; }
+
+        @keyframes pulse {
+            0% { transform: scale(1); }
+            50% { transform: scale(1.02); }
+            100% { transform: scale(1); }
+        }
+        .new-order { animation: pulse 0.5s ease-in-out; }
+    </style>
+</head>
+<body>
+    <header>
+        <div class="logo">🏛️ GREEK TO GO <span>KITCHEN</span></div>
+        <div class="stats">
+            <div class="stat-item">
+                <div class="stat-val" id="pending-count">0</div>
+                <div class="stat-lbl">Pending</div>
+            </div>
+            <div class="stat-item">
+                <div class="stat-val" id="ready-count">0</div>
+                <div class="stat-lbl">Ready</div>
+            </div>
+        </div>
+    </header>
+
+    <main id="main-content">
+        <div id="orders-container" class="orders-grid">
+            <!-- Orders will appear here -->
+        </div>
+        <div id="empty-msg" class="empty-state">
+            <h2>🍳 Kitchen is Quiet</h2>
+            <p>New orders from the POS will appear here automatically.</p>
+        </div>
+    </main>
+
+    <audio id="alert-sound" src="https://assets.mixkit.co/active_storage/sfx/2869/2869-preview.mp3"></audio>
+
+    <script>
+        let orders = [];
+
+        function loadOrders() {
+            try {
+                const saved = localStorage.getItem('gtg_kitchen_orders');
+                if (saved) {
+                    orders = JSON.parse(saved);
+                    renderOrders();
+                }
+            } catch (e) {
+                console.error("Failed to load orders", e);
+            }
+        }
+
+        function saveOrders() {
+            localStorage.setItem('gtg_kitchen_orders', JSON.stringify(orders));
+            updateStats();
+        }
+
+        function updateStats() {
+            const pending = orders.filter(o => o.status === 'pending').length;
+            const ready = orders.filter(o => o.status === 'ready').length;
+            document.getElementById('pending-count').textContent = pending;
+            document.getElementById('ready-count').textContent = ready;
+            
+            document.getElementById('empty-msg').style.display = orders.length === 0 ? 'block' : 'none';
+        }
+
+        function renderOrders() {
+            const container = document.getElementById('orders-container');
+            container.innerHTML = '';
+
+            // Show pending first, then ready
+            const sortedOrders = [...orders].sort((a, b) => {
+                if (a.status === b.status) return b.sentAt - a.sentAt;
+                return a.status === 'pending' ? -1 : 1;
+            });
+
+            sortedOrders.forEach(order => {
+                const timeStr = new Date(order.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+                const elapsed = Math.floor((Date.now() - order.sentAt) / 60000);
+                const isPriority = elapsed > 15 && order.status === 'pending';
+
+                const card = document.createElement('div');
+                card.className = `order-card ${order.status} ${isPriority ? 'priority' : ''}`;
+                card.innerHTML = `
+                    <div class="card-header">
+                        <div class="order-meta">
+                            <h3>Table: ${order.table}</h3>
+                            <p>Order #${order.orderNum} • ${order.customer || 'No Name'}</p>
+                        </div>
+                        <div class="order-time">${timeStr}</div>
+                    </div>
+                    <div class="card-body">
+                        ${order.items.map(item => `
+                            <div class="item-row">
+                                <span class="item-qty">${item.qty}x</span>
+                                <span class="item-name">${item.name}</span>
+                            </div>
+                        `).join('')}
+                        ${order.notes ? `<div class="order-notes">📝 ${order.notes}</div>` : ''}
+                    </div>
+                    <div class="card-footer">
+                        ${order.status === 'pending' 
+                            ? `<button class="btn btn-ready" onclick="markReady('${order.id}')">✅ READY</button>`
+                            : `<button class="btn btn-clear" onclick="removeOrder('${order.id}')">🗑 DONE</button>`
+                        }
+                    </div>
+                `;
+                container.appendChild(card);
+            });
+            updateStats();
+        }
+
+        function markReady(id) {
+            const order = orders.find(o => String(o.id) === String(id));
+            if (order) {
+                order.status = 'ready';
+                saveOrders();
+                renderOrders();
+            }
+        }
+
+        function removeOrder(id) {
+            orders = orders.filter(o => String(o.id) === String(id) ? false : true);
+            saveOrders();
+            renderOrders();
+        }
+
+        // Listen for new orders from POS
+        window.addEventListener('storage', (e) => {
+            if (e.key === 'gtg_kitchen_sync' && e.newValue) {
+                const newOrder = JSON.parse(e.newValue);
+                // Check if already exists
+                if (!orders.find(o => String(o.id) === String(newOrder.id))) {
+                    orders.unshift(newOrder);
+                    saveOrders();
+                    renderOrders();
+                    
+                    // Play sound
+                    document.getElementById('alert-sound').play().catch(err => console.log("Sound blocked"));
+                    
+                    // Add animation to the first card
+                    setTimeout(() => {
+                        const firstCard = document.querySelector('.order-card');
+                        if (firstCard) firstCard.classList.add('new-order');
+                    }, 100);
+                }
+            }
+            // Also sync if the main list changed elsewhere
+            if (e.key === 'gtg_kitchen_orders') {
+                loadOrders();
+            }
+        });
+
+        // Initial load
+        loadOrders();
+        
+        // Refresh every minute to update priority status
+        setInterval(renderOrders, 60000);
+    </script>
+</body>
+</html>
