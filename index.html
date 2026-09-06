@@ -278,8 +278,9 @@ function doLogout(){
   document.getElementById('orders-grid').innerHTML = '';
 }
 
-// ── Google Apps Script URL — permanently hardcoded
-var SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwel-nVKgrxqzfJZWRNleuqz7_RGG_bNPsyp1v5KpjxfvO0OnLx2y9LdloPjCbWCcf0EA/exec';
+// ── Google Apps Script URL — loaded from settings or default
+var SHEETS_URL = localStorage.getItem('gtg_sheets_url') ||
+  'https://script.google.com/macros/s/AKfycbxI74ANQbulTjXljEvp8xBGLu4Rtxv4Lcspho8P58XK763ABmW8OCDOp8vfZJBcmTYobA/exec';
 
 var orders       = [];
 var doneToday    = 0;
@@ -302,39 +303,10 @@ setInterval(function(){
 // Sheets call
 function sheetsCall(action, body){
   return new Promise(function(resolve){
-    var cb='g2g_k_'+Date.now()+'_'+Math.random().toString(36).slice(2);
-    var script=document.createElement('script');
-    var finished=false;
-    var t=setTimeout(function(){
-      if(finished) return;
-      finished=true;
-      try{document.body.removeChild(script);}catch(e){}
-      delete window[cb];
-      resolve(null);
-    },15000);
-
-    window[cb]=function(d){
-      if(finished) return;
-      finished=true;
-      clearTimeout(t);
-      try{document.body.removeChild(script);}catch(e){}
-      delete window[cb];
-      resolve(d);
-    };
-
-    script.onerror=function(){
-      if(finished) return;
-      finished=true;
-      clearTimeout(t);
-      try{document.body.removeChild(script);}catch(e){}
-      delete window[cb];
-      resolve(null);
-    };
-
-    script.src=SHEETS_URL+'?action='+encodeURIComponent(action)
-      +'&data='+encodeURIComponent(JSON.stringify(body||{}))
-      +'&callback='+encodeURIComponent(cb)
-      +'&_='+Date.now();
+    var cb='k_'+Date.now(), script=document.createElement('script');
+    var t=setTimeout(function(){ resolve(null); try{document.body.removeChild(script);}catch(e){} delete window[cb]; },15000);
+    window[cb]=function(d){ clearTimeout(t); resolve(d); try{document.body.removeChild(script);}catch(e){} delete window[cb]; };
+    script.src=SHEETS_URL+'?action='+action+'&data='+encodeURIComponent(JSON.stringify(body||{}))+'&callback='+cb;
     document.body.appendChild(script);
   });
 }
@@ -347,52 +319,25 @@ window.addEventListener('DOMContentLoaded', function(){
 async function initKitchen(){
   setDB('loading','Connecting…');
   loadPrinterSettings();
-
+  if(!localStorage.getItem('gtg_sheets_url')){
+    setTimeout(function(){ showToast('👆 Tap 🔗 Script URL to connect Google Sheets','warning'); },800);
+  }
   var ping = await sheetsCall('ping');
   if(ping && ping.ok){
-    _online=true;
-    setDB('ok','● Google Sheets ✓');
+    _online=true; setDB('ok','● Google Sheets ✓');
     await refresh();
     startAutoRefresh();
   } else {
-    _online=false;
-    setDB('err','Sheets connection failed');
-    showToast('⚠️ Google Sheets did not respond. Retrying…','warning');
+    setDB('err','Offline — tap to retry');
+    showToast('⚠️ Cannot reach Sheets.','warning');
     renderOrders();
-    startConnectionRetry();
   }
-}
-
-var connectionRetryTimer = null;
-function startConnectionRetry(){
-  if(connectionRetryTimer) clearInterval(connectionRetryTimer);
-  connectionRetryTimer = setInterval(async function(){
-    if(_online){
-      clearInterval(connectionRetryTimer);
-      connectionRetryTimer=null;
-      return;
-    }
-    setDB('loading','Retrying Sheets…');
-    var ping = await sheetsCall('ping');
-    if(ping && ping.ok){
-      _online=true;
-      setDB('ok','● Google Sheets ✓');
-      clearInterval(connectionRetryTimer);
-      connectionRetryTimer=null;
-      await refresh();
-      startAutoRefresh();
-    } else {
-      setDB('err','Sheets connection failed');
-    }
-  },5000);
 }
 
 // Refresh
 async function refresh(){
   var res = await sheetsCall('getKitchenOrders');
   if(res && res.orders){
-    _online=true;
-    setDB('ok','● Google Sheets ✓');
     var pending = res.orders.filter(function(o){ return o.status==='pending'; })
       .map(function(o){
         try{ var items = typeof o.items==='string' ? JSON.parse(o.items) : o.items; o.items=items; }catch(e){ o.items=[]; }
@@ -407,10 +352,6 @@ async function refresh(){
     _lastOrderIds = new Set(pending.map(function(o){ return String(o.id); }));
     orders = pending;
     renderOrders();
-  } else {
-    _online=false;
-    setDB('err','Sync failed — retrying');
-    startConnectionRetry();
   }
 }
 
