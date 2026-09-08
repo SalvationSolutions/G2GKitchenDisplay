@@ -107,7 +107,7 @@ body{background:#0d0d1a;color:#fff;font-family:Nunito,sans-serif;min-height:100v
 .login-error{color:#E74C3C;font-size:12px;font-weight:700;min-height:20px;margin-bottom:8px}
 
 /* PRINTER SETTINGS */
-.settings-panel{position:fixed;top:0;right:-320px;width:300px;height:100vh;background:#111122;border-left:1px solid #222244;padding:20px;transition:.3s;z-index:900;overflow-y:auto}
+.settings-panel{position:fixed;top:0;right:-320px;width:300px;max-width:88vw;height:100vh;background:#111122;border-left:1px solid #222244;padding:20px;transition:.3s;z-index:900;overflow-y:auto}
 .settings-panel.open{right:0}
 .settings-panel h3{font-family:Cinzel,serif;color:#C9A227;margin-bottom:16px;font-size:15px}
 .s-label{font-size:11px;font-weight:800;color:#888;text-transform:uppercase;margin-bottom:5px;display:block}
@@ -115,6 +115,67 @@ body{background:#0d0d1a;color:#fff;font-family:Nunito,sans-serif;min-height:100v
 .s-input:focus{border-color:#C9A227}
 .s-btn{width:100%;padding:10px;background:#C9A227;color:#0d0d1a;border:none;border-radius:8px;font-family:Nunito,sans-serif;font-weight:900;cursor:pointer;margin-top:4px}
 .s-close{background:#222244;color:#fff;margin-top:8px}
+
+/* ── RESPONSIVE: TABLET (≤1024px) ─────────────────────────────────────── */
+@media (max-width:1024px){
+  .orders-grid{grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:14px;padding:16px}
+  .header{padding:10px 14px}
+  .toolbar{padding:8px 14px}
+}
+
+/* ── RESPONSIVE: MOBILE (≤680px) ──────────────────────────────────────── */
+@media (max-width:680px){
+  .header{flex-wrap:wrap;row-gap:10px;padding:10px 12px}
+  .header-left h1{font-size:14px;letter-spacing:.5px}
+  .header-left span{font-size:22px!important}
+  .clock{font-size:16px;letter-spacing:1px}
+  .header > div:last-child{width:100%;justify-content:space-between;gap:8px;flex-wrap:wrap}
+  #db-pill{padding:4px 10px;order:1}
+  #user-badge{order:3;font-size:10px!important}
+  .header .btn{font-size:10px!important;padding:7px 10px}
+
+  .toolbar{flex-wrap:wrap;gap:10px;padding:10px 12px}
+  .toolbar-stats{width:100%;justify-content:space-around;margin-right:0;order:1}
+  .t-stat-num{font-size:18px}
+  .auto-badge{order:2;flex:1;justify-content:center}
+  .btn-refresh,.btn-print,.btn-done-all{order:3;flex:1;min-height:40px;font-size:11px;padding:9px 8px}
+
+  .orders-grid{grid-template-columns:1fr;gap:12px;padding:12px}
+  .order-num{font-size:16px}
+  .timer-badge{font-size:11px}
+  .item-row{font-size:13px}
+  .card-footer{flex-direction:row}
+  .btn-done,.btn-print-ticket{min-height:44px}
+
+  .login-card{padding:28px 22px}
+  .settings-panel{width:100vw;max-width:100vw}
+  .done-card{padding:28px 20px;margin:0 16px}
+}
+
+/* ── RESPONSIVE: VERY SMALL PHONES (≤380px) ───────────────────────────── */
+@media (max-width:380px){
+  .header-left h1{font-size:12px}
+  .clock{font-size:14px}
+  .toolbar-stats{gap:8px}
+  .t-stat-num{font-size:16px}
+  .t-stat-label{font-size:9px}
+}
+
+/* ── RESPONSIVE: LARGE KITCHEN DISPLAYS / TVs (≥1600px) ───────────────── */
+@media (min-width:1600px){
+  .orders-grid{grid-template-columns:repeat(auto-fill,minmax(340px,1fr));gap:22px;padding:28px}
+  .order-num{font-size:22px}
+  .item-name{font-size:16px}
+  .timer-badge{font-size:14px;padding:6px 14px}
+  .clock{font-size:26px}
+  .t-stat-num{font-size:24px}
+}
+
+/* Touch-friendly tap targets everywhere */
+button,.btn,.auto-badge,.item-row{touch-action:manipulation}
+@media (hover:none){
+  .btn,.btn-done,.btn-print-ticket,.s-btn,.login-btn{min-height:42px}
+}
 </style>
 </head>
 <body>
@@ -150,7 +211,6 @@ body{background:#0d0d1a;color:#fff;font-family:Nunito,sans-serif;min-height:100v
     </div>
     <div class="clock" id="clock">--:--:--</div>
     <button class="btn" style="background:#222244;color:#C9A227;border:1px solid #C9A227;font-size:11px" onclick="toggleSettings()">⚙️ Printer</button>
-    <button class="btn" style="background:#222244;color:#fff;border:1px solid #333366;font-size:11px" onclick="openScriptSettings()">🔗 Script URL</button>
     <span id="user-badge" style="font-size:11px;color:rgba(255,255,255,.5);font-weight:700"></span>
     <button class="btn" style="background:#1a0a0a;color:#E74C3C;border:1px solid #E74C3C;font-size:11px" onclick="doLogout()">🚪 Logout</button>
   </div>
@@ -214,28 +274,6 @@ body{background:#0d0d1a;color:#fff;font-family:Nunito,sans-serif;min-height:100v
 
 <div class="toast" id="toast"></div>
 
-<!-- SCRIPT URL MODAL -->
-<div id="script-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,.6);align-items:center;justify-content:center;z-index:1000;padding:20px">
-  <div style="background:#111122;border:1px solid #333366;border-radius:16px;padding:24px;width:100%;max-width:480px">
-    <h3 style="font-family:Cinzel,serif;color:#C9A227;margin-bottom:12px;font-size:15px">🔗 Google Apps Script URL</h3>
-    <p style="font-size:12px;color:#888;margin-bottom:14px;line-height:1.6">This connects the Kitchen Display to your Google Sheets. Paste the same URL used in your main POS.</p>
-    <input id="script-url-input"
-      placeholder="https://script.google.com/macros/s/.../exec"
-      style="width:100%;background:#0d0d1a;border:1px solid #333366;border-radius:8px;padding:10px 12px;color:#fff;font-family:monospace;font-size:11px;margin-bottom:10px;outline:none">
-    <div style="background:#0d0d1a;border-radius:8px;padding:12px;font-size:11px;color:#666;margin-bottom:12px;line-height:1.7">
-      <b style="color:#C9A227">How to get your URL:</b><br>
-      1. Go to <b>script.google.com</b> → open your G2G project<br>
-      2. Click <b>Deploy → Manage deployments</b><br>
-      3. Copy the <b>/exec</b> URL → paste above
-    </div>
-    <div id="script-test-result" style="font-size:12px;font-weight:700;min-height:18px;margin-bottom:12px;color:#888"></div>
-    <div style="display:flex;gap:8px">
-      <button onclick="testAndSaveScript()" style="flex:1;padding:11px;background:#C9A227;color:#0d0d1a;border:none;border-radius:8px;font-family:Nunito,sans-serif;font-weight:900;cursor:pointer">🔗 Test & Save</button>
-      <button onclick="closeScriptModal()" style="padding:11px 18px;background:#222244;color:#fff;border:1px solid #333366;border-radius:8px;font-family:Nunito,sans-serif;font-weight:700;cursor:pointer">Cancel</button>
-    </div>
-  </div>
-</div>
-
 </div><!-- end main-app -->
 <script>
 // ── Credentials ──────────────────────────────────────────────────────────────
@@ -278,9 +316,8 @@ function doLogout(){
   document.getElementById('orders-grid').innerHTML = '';
 }
 
-// ── Google Apps Script URL — loaded from settings or default
-var SHEETS_URL = localStorage.getItem('gtg_sheets_url') ||
-  'https://script.google.com/macros/s/AKfycbxI74ANQbulTjXljEvp8xBGLu4Rtxv4Lcspho8P58XK763ABmW8OCDOp8vfZJBcmTYobA/exec';
+// ── Google Apps Script URL — hardcoded (matches main POS deployment) ─────
+var SHEETS_URL = 'https://script.google.com/macros/s/AKfycbz7-oe_VKlkbQ16RVt240fz374eB5zE0f2Uh91VLH-rEVISfW2El7IS_1_kWNWEeM5f6w/exec';
 
 var orders       = [];
 var doneToday    = 0;
@@ -319,9 +356,6 @@ window.addEventListener('DOMContentLoaded', function(){
 async function initKitchen(){
   setDB('loading','Connecting…');
   loadPrinterSettings();
-  if(!localStorage.getItem('gtg_sheets_url')){
-    setTimeout(function(){ showToast('👆 Tap 🔗 Script URL to connect Google Sheets','warning'); },800);
-  }
   var ping = await sheetsCall('ping');
   if(ping && ping.ok){
     _online=true; setDB('ok','● Google Sheets ✓');
@@ -504,36 +538,6 @@ function setDB(state, msg){
   }
   if(txt){ txt.textContent=msg; txt.style.color=tcol; }
   if(pill){ pill.style.borderColor=col+'44'; }
-}
-
-// Script Settings
-function openScriptSettings(){
-  var el=document.getElementById('script-url-input');
-  if(el) el.value=SHEETS_URL||'';
-  document.getElementById('script-test-result').textContent='';
-  document.getElementById('script-modal').style.display='flex';
-}
-function closeScriptModal(){ document.getElementById('script-modal').style.display='none'; }
-
-async function testAndSaveScript(){
-  var url=(document.getElementById('script-url-input').value||'').trim();
-  var res=document.getElementById('script-test-result');
-  if(!url||!url.includes('script.google.com')){ res.textContent='❌ Invalid URL.'; res.style.color='#E74C3C'; return; }
-  res.textContent='⏳ Testing…'; res.style.color='#888';
-  var result=await new Promise(function(resolve){
-    var cb='k_test_'+Date.now(),s=document.createElement('script');
-    var t=setTimeout(function(){ resolve(null); try{document.body.removeChild(s);}catch(e){} delete window[cb]; },10000);
-    window[cb]=function(d){ clearTimeout(t); resolve(d); try{document.body.removeChild(s);}catch(e){} delete window[cb]; };
-    s.src=url+'?action=ping&callback='+cb; document.body.appendChild(s);
-  });
-  if(result&&result.ok){
-    SHEETS_URL=url; localStorage.setItem('gtg_sheets_url',url);
-    res.textContent='✅ Connected!'; res.style.color='#27AE60';
-    setTimeout(function(){ closeScriptModal(); _online=true; setDB('ok','Google Sheets ✓'); refresh(); },1000);
-  } else {
-    res.textContent='❌ Cannot connect. Check URL and deployment settings (Anyone access).';
-    res.style.color='#E74C3C';
-  }
 }
 
 // Toast
