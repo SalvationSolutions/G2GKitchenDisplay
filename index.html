@@ -492,7 +492,7 @@ function printTicket(o, silent){
 // Auto-refresh
 function startAutoRefresh(){
   if(refreshTimer) clearInterval(refreshTimer);
-  if(autoRefresh) refreshTimer=setInterval(refresh,30000);
+  if(autoRefresh) refreshTimer=setInterval(refresh,4000);
 }
 function toggleAutoRefresh(){
   autoRefresh=!autoRefresh;
@@ -500,7 +500,7 @@ function toggleAutoRefresh(){
   document.getElementById('auto-label').textContent='Auto-refresh '+(autoRefresh?'ON':'OFF');
   document.getElementById('auto-badge').className='auto-badge'+(autoRefresh?' active':'');
   startAutoRefresh();
-  showToast(autoRefresh?'Auto-refresh enabled (30s)':'Auto-refresh disabled','success');
+  showToast(autoRefresh?'Auto-refresh enabled (4s)':'Auto-refresh disabled','success');
 }
 
 // Printer Settings
