@@ -317,7 +317,7 @@ function doLogout(){
 }
 
 // ── Google Apps Script URL — hardcoded (matches main POS deployment) ─────
-var SHEETS_URL = 'https://script.google.com/macros/s/AKfycbyLu-xoPS4i37VQizGXSUQKx5d6Aox_0ppS_mgv5jUFQu7Lt4emqLaua6ADXIXj0u5_cA/exec';
+var SHEETS_URL = 'https://script.google.com/macros/s/AKfycbxuJNiAd0UH9nZ8Zc7IIxxfSvrKdFVPoEFBollzgtHlviBWJdyGLVtQ4f2Q3ADjiyr_rw/exec';
 
 var orders       = [];
 var doneToday    = 0;
@@ -325,6 +325,7 @@ var autoRefresh  = true;
 var refreshTimer = null;
 var _online      = false;
 var _lastOrderIds= new Set();
+var _sessionToken = '';
 
 // Printer config
 var _pc = (function(){ try{ return JSON.parse(localStorage.getItem('gtg_kitchen_printer')||'{}'); }catch(e){ return {}; } })();
@@ -339,8 +340,13 @@ setInterval(function(){
 
 // Sheets call
 function sheetsCall(action, body){
+  body=Object.assign({},body||{});
+  if(_sessionToken && action!=='login') body.sessionToken=_sessionToken;
+  if(action==='login'){
+    return fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({action:action},body)),redirect:'follow'}).then(function(r){return r.json();}).catch(function(){return null;});
+  }
   return new Promise(function(resolve){
-    var cb='k_'+Date.now(), script=document.createElement('script');
+    var cb='k_'+Date.now()+'_'+Math.random().toString(36).slice(2), script=document.createElement('script');
     var t=setTimeout(function(){ resolve(null); try{document.body.removeChild(script);}catch(e){} delete window[cb]; },15000);
     window[cb]=function(d){ clearTimeout(t); resolve(d); try{document.body.removeChild(script);}catch(e){} delete window[cb]; };
     script.src=SHEETS_URL+'?action='+action+'&data='+encodeURIComponent(JSON.stringify(body||{}))+'&callback='+cb;
@@ -356,8 +362,11 @@ window.addEventListener('DOMContentLoaded', function(){
 async function initKitchen(){
   setDB('loading','Connecting…');
   loadPrinterSettings();
-  var ping = await sheetsCall('ping');
-  if(ping && ping.ok){
+  var auth=await sheetsCall('login',{username:currentUser.username,pin:currentUser.password});
+  if(auth&&auth.ok&&auth.sessionToken){
+    _sessionToken=auth.sessionToken;
+    // A successful login already confirms that the backend is reachable.
+    // Skip a second ping so the display starts loading orders immediately.
     _online=true; setDB('ok','● Google Sheets ✓');
     await refresh();
     startAutoRefresh();
@@ -432,16 +441,17 @@ function renderOrders(){
 
 // Mark Done
 async function markDone(id, num){
-  orders = orders.filter(function(o){ return String(o.id)!==String(id); });
-  doneToday++;
-  renderOrders();
-  // Show done overlay
+  var original=orders.slice();
+  orders=orders.filter(function(o){ return String(o.id)!==String(id); });
+  doneToday++; renderOrders();
+  if(_online){
+    var saved=await sheetsCall('updateKitchenOrder',{id:id,status:'done'});
+    if(!saved||!saved.ok){ orders=original; doneToday=Math.max(0,doneToday-1); renderOrders(); showToast('❌ Could not sync completed order. Please try again.','error'); return; }
+  }
   document.getElementById('done-title').textContent = 'Order #'+num+' Done!';
   document.getElementById('done-sub').textContent   = 'Marked as complete ✓';
   var ov=document.getElementById('done-overlay'); ov.classList.add('show');
   setTimeout(function(){ ov.classList.remove('show'); },1800);
-  // Update Sheets
-  if(_online) await sheetsCall('updateKitchenOrder',{id:id,status:'done'});
 }
 
 async function markAllDone(){
