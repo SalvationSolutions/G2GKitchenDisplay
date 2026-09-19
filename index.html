@@ -286,8 +286,28 @@ async function doLogin(){
   if(btn){ btn.disabled=true; btn.textContent='Connecting…'; }
   var res=await sheetsCall('login',{username:user,pin:pass},true);
   if(btn){ btn.disabled=false; btn.textContent='🔓 Enter Kitchen'; }
-  if(!(res&&res.ok&&res.sessionToken)){
-    errEl.textContent=res&&res.error==='TOO_MANY_ATTEMPTS'?'❌ Too many attempts. Try again later.':'❌ Wrong username/PIN or backend unavailable.';
+  if(!res){
+    errEl.textContent='❌ Connection problem while signing in. Please try again.';
+    return;
+  }
+  if(res.ok!==true){
+    var code=String(res.error||'').toUpperCase();
+    if(code==='INVALID_CREDENTIALS'||code==='BAD_LOGIN'||code==='INVALID_LOGIN'||code==='INVALID_PIN'){
+      document.getElementById('login-pass').value='';
+      errEl.textContent='❌ Invalid name or PIN.';
+    }else if(code==='TOO_MANY_ATTEMPTS'){
+      errEl.textContent='❌ Too many attempts. Please try again later.';
+    }else if(code==='NO_SPREADSHEET'){
+      errEl.textContent='❌ Database connection error.';
+    }else if(code==='SERVER_ERROR'){
+      errEl.textContent='❌ Server error while signing in. Please try again.';
+    }else{
+      errEl.textContent='❌ Sign-in failed: '+(res.message||res.error||'Unknown error');
+    }
+    return;
+  }
+  if(!res.user||!res.user.name||!res.sessionToken){
+    errEl.textContent='❌ Sign-in response was incomplete. Please try again.';
     return;
   }
   sessionToken=res.sessionToken;
@@ -344,7 +364,7 @@ function sheetsCall(action, body, skipSession){
     var t=setTimeout(function(){ finish(null); },15000);
     window[cb]=function(d){ finish(d); };
     script.onerror=function(){ finish(null); };
-    script.src=SHEETS_URL+'?action='+encodeURIComponent(action)+'&data='+encodeURIComponent(JSON.stringify(body))+'&callback='+encodeURIComponent(cb);
+    script.src=SHEETS_URL+'?action='+encodeURIComponent(action)+'&payload='+encodeURIComponent(JSON.stringify(body))+'&callback='+encodeURIComponent(cb)+'&_='+Date.now();
     document.body.appendChild(script);
   });
 }
