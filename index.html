@@ -272,44 +272,45 @@ button,.btn,.auto-badge,.item-row{touch-action:manipulation}
 
 </div><!-- end main-app -->
 <script>
-// ── Credentials ──────────────────────────────────────────────────────────────
-var STAFF = [
-  {username:'owner',    password:'1234', role:'Owner'},
-  {username:'Wahlene',  password:'1234', role:'Staff'},
-  {username:'Beth',     password:'5678', role:'Staff'},
-  {username:'Zap',      password:'9999', role:'Staff'},
-  {username:'cashier1', password:'1111', role:'Cashier'},
-  {username:'cashier2', password:'2222', role:'Cashier'},
-];
+// ── Backend authentication — uses the POS Cashiers sheet ──────────────────
 var currentUser = null;
+var sessionToken = '';
 
-function doLogin(){
-  var user  = (document.getElementById('login-user').value||'').trim();
-  var pass  = (document.getElementById('login-pass').value||'').trim();
-  var errEl = document.getElementById('login-error');
-  errEl.textContent = '';
-  var found = STAFF.find(function(s){
-    return s.username.toLowerCase()===user.toLowerCase() && s.password===pass;
-  });
-  if(!found){ errEl.textContent = '❌ Wrong username or password.'; return; }
-  currentUser = found;
-  document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('main-app').style.display = 'block';
-  var badge = document.getElementById('user-badge');
-  if(badge) badge.textContent = '👤 '+found.username;
+async function doLogin(){
+  var user=(document.getElementById('login-user').value||'').trim();
+  var pass=(document.getElementById('login-pass').value||'').trim();
+  var errEl=document.getElementById('login-error');
+  var btn=document.querySelector('.login-btn');
+  errEl.textContent='';
+  if(!user||!pass){ errEl.textContent='❌ Enter username and PIN.'; return; }
+  if(btn){ btn.disabled=true; btn.textContent='Connecting…'; }
+  var res=await sheetsCall('login',{username:user,pin:pass},true);
+  if(btn){ btn.disabled=false; btn.textContent='🔓 Enter Kitchen'; }
+  if(!(res&&res.ok&&res.sessionToken)){
+    errEl.textContent=res&&res.error==='TOO_MANY_ATTEMPTS'?'❌ Too many attempts. Try again later.':'❌ Wrong username/PIN or backend unavailable.';
+    return;
+  }
+  sessionToken=res.sessionToken;
+  currentUser=res.user||{name:user,role:''};
+  document.getElementById('login-screen').style.display='none';
+  document.getElementById('main-app').style.display='block';
+  var badge=document.getElementById('user-badge');
+  if(badge) badge.textContent='👤 '+(currentUser.name||user);
   initKitchen();
 }
 
-function doLogout(){
+async function doLogout(){
   if(!confirm('Logout from Kitchen Display?')) return;
-  currentUser = null;
+  if(sessionToken) await sheetsCall('logout',{},false);
+  sessionToken=''; currentUser=null; _online=false;
   if(refreshTimer) clearInterval(refreshTimer);
-  document.getElementById('main-app').style.display = 'none';
-  document.getElementById('login-screen').style.display = 'flex';
-  document.getElementById('login-user').value = '';
-  document.getElementById('login-pass').value = '';
-  document.getElementById('login-error').textContent = '';
-  document.getElementById('orders-grid').innerHTML = '';
+  document.getElementById('main-app').style.display='none';
+  document.getElementById('login-screen').style.display='flex';
+  document.getElementById('login-user').value='';
+  document.getElementById('login-pass').value='';
+  document.getElementById('login-error').textContent='';
+  document.getElementById('orders-grid').innerHTML='';
+  setDB('err','Signed out');
 }
 
 // ── Google Apps Script URL — hardcoded (matches main POS deployment) ─────
@@ -333,12 +334,17 @@ setInterval(function(){
 },1000);
 
 // Sheets call
-function sheetsCall(action, body){
+function sheetsCall(action, body, skipSession){
   return new Promise(function(resolve){
-    var cb='k_'+Date.now(), script=document.createElement('script');
-    var t=setTimeout(function(){ resolve(null); try{document.body.removeChild(script);}catch(e){} delete window[cb]; },15000);
-    window[cb]=function(d){ clearTimeout(t); resolve(d); try{document.body.removeChild(script);}catch(e){} delete window[cb]; };
-    script.src=SHEETS_URL+'?action='+action+'&data='+encodeURIComponent(JSON.stringify(body||{}))+'&callback='+cb;
+    body=Object.assign({},body||{});
+    if(!skipSession && sessionToken) body.sessionToken=sessionToken;
+    var cb='k_'+Date.now()+'_'+Math.random().toString(36).slice(2), script=document.createElement('script');
+    var finished=false;
+    function finish(d){ if(finished)return; finished=true; clearTimeout(t); try{script.remove();}catch(e){} try{delete window[cb];}catch(e){} resolve(d); }
+    var t=setTimeout(function(){ finish(null); },15000);
+    window[cb]=function(d){ finish(d); };
+    script.onerror=function(){ finish(null); };
+    script.src=SHEETS_URL+'?action='+encodeURIComponent(action)+'&data='+encodeURIComponent(JSON.stringify(body))+'&callback='+encodeURIComponent(cb);
     document.body.appendChild(script);
   });
 }
@@ -351,11 +357,10 @@ window.addEventListener('DOMContentLoaded', function(){
 async function initKitchen(){
   setDB('loading','Connecting…');
   loadPrinterSettings();
-  var ping = await sheetsCall('ping');
+  var ping = await sheetsCall('ping',{},true);
   if(ping && ping.ok){
-    _online=true; setDB('ok','● Google Sheets ✓');
-    await refresh();
-    startAutoRefresh();
+    var ok=await refresh();
+    if(ok) startAutoRefresh();
   } else {
     setDB('err','Offline — tap to retry');
     showToast('⚠️ Cannot reach Sheets.','warning');
@@ -366,8 +371,16 @@ async function initKitchen(){
 // Refresh
 async function refresh(){
   var res = await sheetsCall('getKitchenOrders');
-  if(!(res && res.orders)){
-    _online=false; setDB('err','Offline — retrying…');
+  if(!(res && Array.isArray(res.orders))){
+    _online=false;
+    if(res && (res.authRequired || res.error==='AUTH_REQUIRED')){
+      sessionToken='';
+      setDB('err','Session expired');
+      showToast('🔒 Session expired. Please sign in again.','warning');
+      if(refreshTimer) clearInterval(refreshTimer);
+      document.getElementById('main-app').style.display='none';
+      document.getElementById('login-screen').style.display='flex';
+    } else { setDB('err','Offline — retrying…'); }
     return false;
   }
   _online=true; setDB('ok','● Google Sheets ✓');
