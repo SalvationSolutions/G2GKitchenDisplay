@@ -287,7 +287,7 @@ async function doLogin(){
   var res=await sheetsCall('login',{username:user,pin:pass},true);
   if(btn){ btn.disabled=false; btn.textContent='🔓 Enter Kitchen'; }
   if(!res){
-    errEl.textContent='❌ Connection problem while signing in. Please try again.';
+    errEl.textContent='❌ Connection problem: '+(window._kLastError||'Apps Script did not respond.');
     return;
   }
   if(res.ok!==true){
@@ -354,18 +354,41 @@ setInterval(function(){
 },1000);
 
 // Sheets call
+function _kJsonp(fullUrl, timeoutMs){
+  return new Promise(function(resolve,reject){
+    var cb='gtgcb'+Date.now()+Math.floor(Math.random()*100000);
+    var script=document.createElement('script');
+    var done=false;
+    function cleanup(){
+      clearTimeout(timer);
+      try{delete window[cb];}catch(e){window[cb]=undefined;}
+      try{script.remove();}catch(e){}
+    }
+    window[cb]=function(data){
+      if(done)return; done=true; cleanup(); resolve(data);
+    };
+    script.onerror=function(){
+      if(done)return; done=true; cleanup(); reject(new Error('Apps Script connection failed.'));
+    };
+    var timer=setTimeout(function(){
+      if(done)return; done=true; cleanup(); reject(new Error('Apps Script did not respond in time.'));
+    },Number(timeoutMs)||30000);
+    script.async=true;
+    script.src=fullUrl+(fullUrl.indexOf('?')>-1?'&':'?')
+      +'callback='+encodeURIComponent(cb)+'&_='+Date.now();
+    document.head.appendChild(script);
+  });
+}
+
 function sheetsCall(action, body, skipSession){
-  return new Promise(function(resolve){
-    body=Object.assign({},body||{});
-    if(!skipSession && sessionToken) body.sessionToken=sessionToken;
-    var cb='k_'+Date.now()+'_'+Math.random().toString(36).slice(2), script=document.createElement('script');
-    var finished=false;
-    function finish(d){ if(finished)return; finished=true; clearTimeout(t); try{script.remove();}catch(e){} try{delete window[cb];}catch(e){} resolve(d); }
-    var t=setTimeout(function(){ finish(null); },15000);
-    window[cb]=function(d){ finish(d); };
-    script.onerror=function(){ finish(null); };
-    script.src=SHEETS_URL+'?action='+encodeURIComponent(action)+'&payload='+encodeURIComponent(JSON.stringify(body))+'&callback='+encodeURIComponent(cb)+'&_='+Date.now();
-    document.body.appendChild(script);
+  var payload=Object.assign({},body||{});
+  if(!skipSession && sessionToken && action!=='login' && action!=='ping') payload.sessionToken=sessionToken;
+  var full=SHEETS_URL+(SHEETS_URL.indexOf('?')>-1?'&':'?')
+    +'action='+encodeURIComponent(action)
+    +'&payload='+encodeURIComponent(JSON.stringify(payload));
+  return _kJsonp(full,30000).catch(function(err){
+    window._kLastError=(err&&err.message)||String(err);
+    return null;
   });
 }
 
