@@ -249,12 +249,9 @@ button,.btn,.auto-badge,.item-row{touch-action:manipulation}
   <label class="s-label">Printer Type</label>
   <select id="p-type" class="s-input" onchange="updatePType()">
     <option value="rawbt">RawBT (XP-58IID via Bluetooth)</option>
-    <option value="browser">Browser Print (WiFi Printer)</option>
+    <option value="browser">Browser/Desktop 58mm Print</option>
   </select>
-  <div id="p-ip-group" style="display:none">
-    <label class="s-label">Printer IP Address</label>
-    <input id="p-ip" class="s-input" placeholder="e.g. 192.168.1.105">
-  </div>
+
   <label class="s-label">Auto-print new orders</label>
   <select id="p-auto" class="s-input">
     <option value="yes">Yes — print automatically</option>
@@ -276,48 +273,53 @@ button,.btn,.auto-badge,.item-row{touch-action:manipulation}
 
 </div><!-- end main-app -->
 <script>
-// ── Credentials ──────────────────────────────────────────────────────────────
-var STAFF = [
-  {username:'owner',    password:'1234', role:'Owner'},
-  {username:'Wahlene',  password:'1234', role:'Staff'},
-  {username:'Beth',     password:'5678', role:'Staff'},
-  {username:'Zap',      password:'9999', role:'Staff'},
-  {username:'cashier1', password:'1111', role:'Cashier'},
-  {username:'cashier2', password:'2222', role:'Cashier'},
-];
+// ── Authentication ───────────────────────────────────────────────────────────
+// SECURITY: credentials are NEVER stored in this public HTML.
+// Username + PIN are sent directly to the Apps Script backend for validation.
 var currentUser = null;
+var _loginBusy = false;
 
-function doLogin(){
+async function doLogin(){
+  if(_loginBusy) return;
   var user  = (document.getElementById('login-user').value||'').trim();
   var pass  = (document.getElementById('login-pass').value||'').trim();
   var errEl = document.getElementById('login-error');
+  var btn   = document.querySelector('.login-btn');
   errEl.textContent = '';
-  var found = STAFF.find(function(s){
-    return s.username.toLowerCase()===user.toLowerCase() && s.password===pass;
-  });
-  if(!found){ errEl.textContent = '❌ Wrong username or password.'; return; }
-  currentUser = found;
-  document.getElementById('login-screen').style.display = 'none';
-  document.getElementById('main-app').style.display = 'block';
-  var badge = document.getElementById('user-badge');
-  if(badge) badge.textContent = '👤 '+found.username;
-  initKitchen();
+  if(!user || !pass){ errEl.textContent='❌ Enter username and password / PIN.'; return; }
+  _loginBusy=true; if(btn){btn.disabled=true;btn.textContent='Connecting…';}
+  try{
+    var auth=await sheetsCall('login',{username:user,pin:pass});
+    if(!auth || !auth.ok || !auth.sessionToken){
+      errEl.textContent = (auth&&auth.error) ? '❌ '+auth.error : '❌ Wrong username/PIN or backend unavailable.';
+      return;
+    }
+    _sessionToken=auth.sessionToken;
+    currentUser={username:(auth.username||user),role:(auth.role||'Staff')};
+    document.getElementById('login-screen').style.display='none';
+    document.getElementById('main-app').style.display='block';
+    var badge=document.getElementById('user-badge');
+    if(badge) badge.textContent='👤 '+currentUser.username+(currentUser.role?' · '+currentUser.role:'');
+    await initKitchen(true);
+  } finally {
+    _loginBusy=false; if(btn){btn.disabled=false;btn.textContent='🔓 Enter Kitchen';}
+  }
 }
 
 function doLogout(){
   if(!confirm('Logout from Kitchen Display?')) return;
-  currentUser = null;
+  currentUser=null; _sessionToken=''; _online=false;
   if(refreshTimer) clearInterval(refreshTimer);
-  document.getElementById('main-app').style.display = 'none';
-  document.getElementById('login-screen').style.display = 'flex';
-  document.getElementById('login-user').value = '';
-  document.getElementById('login-pass').value = '';
-  document.getElementById('login-error').textContent = '';
-  document.getElementById('orders-grid').innerHTML = '';
+  document.getElementById('main-app').style.display='none';
+  document.getElementById('login-screen').style.display='flex';
+  document.getElementById('login-user').value='';
+  document.getElementById('login-pass').value='';
+  document.getElementById('login-error').textContent='';
+  document.getElementById('orders-grid').innerHTML='';
 }
 
 // ── Google Apps Script URL — hardcoded (matches main POS deployment) ─────
-var SHEETS_URL = 'https://script.google.com/macros/s/AKfycbwMt7uo8TrMshH6SSfQkf_wx6sEK4xCgvo7BMw2xU_7M3myAmLy-xhjLN5P8zDgwtrD2Q/exec';
+var SHEETS_URL = 'https://script.google.com/macros/s/AKfycbximx73Wr5GuqjiulSbjj0mGTp9-L4793v7bR-BcYM4wFXubWJvj4RrfNnBitxPGoX6IA/exec';
 
 var orders       = [];
 var doneToday    = 0;
@@ -343,7 +345,7 @@ function sheetsCall(action, body){
   body=Object.assign({},body||{});
   if(_sessionToken && action!=='login') body.sessionToken=_sessionToken;
   if(action==='login'){
-    return fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({action:action},body)),redirect:'follow'}).then(function(r){return r.json();}).catch(function(){return null;});
+    var ctrl=new AbortController(), timer=setTimeout(function(){ctrl.abort();},15000); return fetch(SHEETS_URL,{method:'POST',headers:{'Content-Type':'text/plain;charset=utf-8'},body:JSON.stringify(Object.assign({action:action},body)),redirect:'follow',signal:ctrl.signal}).then(function(r){return r.json();}).catch(function(){return null;}).finally(function(){clearTimeout(timer);});
   }
   return new Promise(function(resolve){
     var cb='k_'+Date.now()+'_'+Math.random().toString(36).slice(2), script=document.createElement('script');
@@ -359,85 +361,53 @@ window.addEventListener('DOMContentLoaded', function(){
   setTimeout(function(){ var el=document.getElementById('login-user'); if(el) el.focus(); }, 200);
 });
 
-async function initKitchen(){
+async function initKitchen(alreadyAuthenticated){
   setDB('loading','Connecting…');
   loadPrinterSettings();
-  var auth=await sheetsCall('login',{username:currentUser.username,pin:currentUser.password});
-  if(auth&&auth.ok&&auth.sessionToken){
-    _sessionToken=auth.sessionToken;
-    // A successful login already confirms that the backend is reachable.
-    // Skip a second ping so the display starts loading orders immediately.
-    _online=true; setDB('ok','● Google Sheets ✓');
-    await refresh();
-    startAutoRefresh();
-  } else {
-    setDB('err','Offline — tap to retry');
-    showToast('⚠️ Cannot reach Sheets.','warning');
-    renderOrders();
-  }
+  if(!_sessionToken){ setDB('err','Not authenticated'); return; }
+  _online=true; setDB('ok','● Google Sheets ✓');
+  await refresh();
+  startAutoRefresh();
 }
 
 // Refresh
 async function refresh(){
-  var res = await sheetsCall('getKitchenOrders');
-  if(res && res.orders){
-    var pending = res.orders.filter(function(o){ return o.status==='pending'; })
-      .map(function(o){
-        try{ var items = typeof o.items==='string' ? JSON.parse(o.items) : o.items; o.items=items; }catch(e){ o.items=[]; }
-        return o;
-      });
-    // Detect new orders for auto-print
-    if(AUTO_PRINT && _lastOrderIds.size > 0){
-      pending.forEach(function(o){
-        if(!_lastOrderIds.has(String(o.id))){ printTicket(o, true); }
-      });
-    }
-    _lastOrderIds = new Set(pending.map(function(o){ return String(o.id); }));
-    orders = pending;
-    renderOrders();
+  var res=await sheetsCall('getKitchenOrders');
+  if(!res || res.ok===false){ _online=false; setDB('err','Offline — retrying'); showToast('⚠️ Kitchen sync failed. Retrying…','warning'); return false; }
+  _online=true; setDB('ok','● Google Sheets ✓');
+  if(typeof res.doneToday==='number') doneToday=res.doneToday;
+  if(Array.isArray(res.orders)){
+    var pending=res.orders.filter(function(o){return String(o.status||'').toLowerCase()==='pending';}).map(function(o){ try{var items=typeof o.items==='string'?JSON.parse(o.items):o.items;o.items=Array.isArray(items)?items:[];}catch(e){o.items=[];} return o; });
+    if(AUTO_PRINT && _lastOrderIds.size>0){ pending.forEach(function(o){if(!_lastOrderIds.has(String(o.id))) printTicket(o,true);}); }
+    _lastOrderIds=new Set(pending.map(function(o){return String(o.id);})); orders=pending; renderOrders();
   }
+  return true;
 }
+
+// Safe text helpers — all backend/user-controlled values are escaped before HTML insertion.
+function esc(v){
+  return String(v==null?'':v).replace(/[&<>"']/g,function(c){return {'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c];});
+}
+function jsArg(v){ return JSON.stringify(String(v==null?'':v)).replace(/</g,'\u003c'); }
 
 // Render
 function renderOrders(){
-  var grid = document.getElementById('orders-grid');
-  var now  = Date.now();
-  var urgent = 0;
-  document.getElementById('stat-pending').textContent   = orders.length;
-  document.getElementById('stat-done-today').textContent= doneToday;
-  if(!orders.length){
-    document.getElementById('stat-urgent').textContent = 0;
-    grid.innerHTML = '<div style="grid-column:1/-1"><div class="empty-state"><div class="icon">🍽️</div><h2>All Clear!</h2><p>No pending orders. Kitchen is caught up.</p></div></div>';
-    return;
-  }
-  grid.innerHTML = orders.map(function(o){
-    var elapsed = Math.floor((now - parseInt(o.sentAt||now)) / 1000);
-    var mins    = Math.floor(elapsed/60);
-    var secs    = elapsed%60;
-    var color   = elapsed<300?'green':elapsed<600?'orange':'red';
-    if(color==='red') urgent++;
-    var timerStr= mins+'m '+String(secs).padStart(2,'0')+'s';
-    var items   = (o.items||[]).map(function(item){
-      return '<div class="item-row"><span class="item-qty">x'+(item.qty||1)+'</span><span class="item-name">'+(item.name||item)+'</span></div>';
-    }).join('');
-    var note = o.notes ? '<div class="note-row">📝 '+o.notes+'</div>' : '';
-    var cust = o.customer ? '<div class="customer-row">👤 '+o.customer+'</div>' : '';
-    return '<div class="order-card '+color+'">'
-      +'<div class="card-header '+color+'">'
-      +'<div><div class="order-num">Order #'+(String(o.orderNum||o.id).padStart(4,'0'))+'</div>'
-      +'<div class="order-table">📍 '+(o.table||'Takeout')+(o.cashier?' · '+o.cashier:'')+'</div>'
-      +cust+'</div>'
-      +'<div class="timer-badge '+color+'">⏱ '+timerStr+'</div>'
-      +'</div>'
-      +'<div class="card-body">'+items+note+'</div>'
-      +'<div class="card-footer">'
-      +'<button class="btn-print-ticket" onclick="printTicket(orders.find(function(x){return x.id===\''+o.id+'\'}))" title="Print Ticket">🖨️</button>'
-      +'<button class="btn-done" onclick="markDone(\''+o.id+'\',\''+String(o.orderNum||'').padStart(4,'0')+'\')">✅ Mark Done</button>'
-      +'</div>'
-      +'</div>';
+  var grid=document.getElementById('orders-grid'), now=Date.now(), urgent=0;
+  document.getElementById('stat-pending').textContent=orders.length;
+  document.getElementById('stat-done-today').textContent=doneToday;
+  if(!orders.length){ document.getElementById('stat-urgent').textContent=0; grid.innerHTML='<div style="grid-column:1/-1"><div class="empty-state"><div class="icon">🍽️</div><h2>All Clear!</h2><p>No pending orders. Kitchen is caught up.</p></div></div>'; return; }
+  grid.innerHTML=orders.map(function(o){
+    var sent=parseInt(o.sentAt||now,10); if(!isFinite(sent)) sent=now;
+    var elapsed=Math.max(0,Math.floor((now-sent)/1000)), mins=Math.floor(elapsed/60), secs=elapsed%60;
+    var color=elapsed<300?'green':elapsed<600?'orange':'red'; if(color==='red') urgent++;
+    var items=(Array.isArray(o.items)?o.items:[]).map(function(item){ var qty=(item&&item.qty)||1, name=(item&&item.name)||item||''; return '<div class="item-row"><span class="item-qty">x'+esc(qty)+'</span><span class="item-name">'+esc(name)+'</span></div>'; }).join('');
+    var note=o.notes?'<div class="note-row">📝 '+esc(o.notes)+'</div>':'', cust=o.customer?'<div class="customer-row">👤 '+esc(o.customer)+'</div>':'';
+    var id=String(o.id==null?'':o.id), num=String(o.orderNum||o.id||'').padStart(4,'0');
+    return '<div class="order-card '+color+'"><div class="card-header '+color+'"><div><div class="order-num">Order #'+esc(num)+'</div><div class="order-table">📍 '+esc(o.table||'Takeout')+(o.cashier?' · '+esc(o.cashier):'')+'</div>'+cust+'</div><div class="timer-badge '+color+'">⏱ '+mins+'m '+String(secs).padStart(2,'0')+'s</div></div><div class="card-body">'+items+note+'</div><div class="card-footer"><button class="btn-print-ticket" onclick="printById('+jsArg(id)+')" title="Print Ticket">🖨️</button><button class="btn-done" onclick="markDone('+jsArg(id)+','+jsArg(num)+')">✅ Mark Done</button></div></div>';
   }).join('');
-  document.getElementById('stat-urgent').textContent = urgent;
+  document.getElementById('stat-urgent').textContent=urgent;
 }
+function printById(id){ var o=orders.find(function(x){return String(x.id)===String(id);}); printTicket(o); }
 
 // Mark Done
 async function markDone(id, num){
@@ -455,14 +425,14 @@ async function markDone(id, num){
 }
 
 async function markAllDone(){
-  if(!orders.length){ showToast('No pending orders.','warning'); return; }
+  if(!orders.length){showToast('No pending orders.','warning');return;}
   if(!confirm('Mark ALL '+orders.length+' orders as done?')) return;
-  var ids = orders.map(function(o){ return o.id; });
-  doneToday += orders.length;
-  orders=[];
-  renderOrders();
-  showToast('✅ All orders marked done!','success');
-  if(_online){ for(var i=0;i<ids.length;i++) await sheetsCall('updateKitchenOrder',{id:ids[i],status:'done'}); }
+  if(!_online){showToast('❌ Offline. Reconnect before marking orders done.','error');return;}
+  var snapshot=orders.slice(), failed=[];
+  showToast('Saving '+snapshot.length+' completed orders…','warning');
+  for(var i=0;i<snapshot.length;i++){ var r=await sheetsCall('updateKitchenOrder',{id:snapshot[i].id,status:'done'}); if(!r||!r.ok) failed.push(String(snapshot[i].id)); }
+  if(failed.length){ await refresh(); showToast('❌ '+failed.length+' order(s) could not be updated.','error'); return; }
+  doneToday+=snapshot.length; orders=[]; renderOrders(); showToast('✅ All orders marked done!','success');
 }
 
 // Print Ticket
@@ -491,8 +461,9 @@ function printTicket(o, silent){
     setTimeout(function(){ try{document.body.removeChild(a);}catch(e){} },1000);
     if(!silent) showToast('🖨️ Sending to printer…','success');
   } else {
-    var css='@page{margin:0;size:80mm auto}body{font-family:"Courier New",monospace;font-size:12px;width:72mm;margin:0 auto;padding:4mm;white-space:pre-wrap}';
-    var html='<!DOCTYPE html><html><head><meta charset="utf-8"><style>'+css+'</style></head><body>'+text+'<'+'script>window.onload=function(){window.print();setTimeout(function(){window.close()},500)}<'+'/script></body></html>';
+    var css='@page{margin:0;size:58mm auto}html,body{margin:0;padding:0;width:58mm}body{box-sizing:border-box;font-family:"Courier New",monospace;font-size:10px;line-height:1.25;width:54mm;padding:2mm;white-space:pre-wrap;overflow-wrap:anywhere;color:#000;background:#fff}';
+    var safeText=esc(text);
+    var html='<!DOCTYPE html><html><head><meta charset="utf-8"><style>'+css+'</style></head><body>'+safeText+'<'+'script>window.onload=function(){window.print();setTimeout(function(){window.close()},500)}<'+'/script></body></html>';
     var w=window.open('','_blank','width=400,height=500');
     if(w){ w.document.write(html); w.document.close(); }
     if(!silent) showToast('🖨️ Print dialog opened.','success');
@@ -517,17 +488,16 @@ function toggleAutoRefresh(){
 function toggleSettings(){ document.getElementById('settings-panel').classList.toggle('open'); }
 function updatePType(){
   var t=document.getElementById('p-type').value;
-  document.getElementById('p-ip-group').style.display=t==='browser'?'block':'none';
+  // Browser/Desktop mode uses the operating system print dialog; no fake IP setting.
 }
 function loadPrinterSettings(){
   document.getElementById('p-type').value=PRINTER_TYPE;
-  document.getElementById('p-ip').value=PRINTER_IP;
   document.getElementById('p-auto').value=AUTO_PRINT?'yes':'no';
   updatePType();
 }
 function saveSettings(){
   PRINTER_TYPE=document.getElementById('p-type').value;
-  PRINTER_IP  =document.getElementById('p-ip').value.trim();
+  PRINTER_IP='';
   AUTO_PRINT  =document.getElementById('p-auto').value==='yes';
   localStorage.setItem('gtg_kitchen_printer',JSON.stringify({type:PRINTER_TYPE,ip:PRINTER_IP,auto:AUTO_PRINT?'yes':'no'}));
   toggleSettings();
